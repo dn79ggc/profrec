@@ -19,11 +19,43 @@ import streamlit as st  # noqa: E402
 from profrec import config  # noqa: E402
 from profrec.criteria import TRAIT_NAMES, TRAITS  # noqa: E402
 from profrec.engine import Candidate, Engine, Recommendation  # noqa: E402
+from profrec.examples import EXAMPLE_REQUESTS  # noqa: E402
 from profrec.parser import FallbackParser, GeminiParser, ParserError, RuleBasedParser  # noqa: E402
-from profrec.render import ordinal  # noqa: E402
+from profrec.render import nice_date, ordinal  # noqa: E402
 from profrec.schema import Criterion, ParsedRequest, ScheduleConstraints  # noqa: E402
 
 st.set_page_config(page_title="Professor Match", page_icon="🎓", layout="wide")
+
+# Theme switch: Streamlit swaps all colors at once, which reads as a flash. Easing color-like properties
+# turns it into a ~0.4 s cross-fade. Skipped entirely for people who ask their OS for reduced motion.
+# opacity/transform/width are listed too so Streamlit's own fades and slides keep working.
+#
+# Secondary text: Streamlit fades captions and quotes with opacity 0.6, which on the soft palette drops
+# below WCAG AA (3.6:1 in light mode) and also fades any link inside them. Fading the text color instead
+# keeps links at full strength; 80% keeps every pairing at 6:1 or better in both themes.
+#
+# Deploy button: only shows on localhost and does nothing for students, so it is hidden. The menu next to it
+# stays, because Settings (Light / Dark / System) lives there. toolbarMode="viewer" would remove Settings too.
+# The user's chat bubble is tinted from the text color, so it follows both themes instead of a fixed grey.
+st.html("""
+<style>
+[data-testid="stCaptionContainer"], .stApp blockquote {
+  opacity: 1 !important;
+  color: color-mix(in srgb, currentColor 80%, transparent);
+}
+[data-testid="stAppDeployButton"] { display: none; }
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
+  background-color: color-mix(in srgb, currentColor 7%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .stApp, .stApp *, .stApp *::before, .stApp *::after {
+    transition: background-color 420ms ease, color 420ms ease, border-color 420ms ease,
+                fill 420ms ease, stroke 420ms ease, box-shadow 420ms ease,
+                opacity 200ms ease, transform 200ms ease, width 200ms ease;
+  }
+}
+</style>
+""")
 
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 CONF_LABEL = {"none": "no reviews", "low": "very few reviews", "medium": "some reviews", "high": "many reviews"}
@@ -70,6 +102,33 @@ def sections_table(c: Candidate) -> pd.DataFrame:
     } for s in c.sections])
 
 
+def _retake(r: dict) -> str:
+    return f"{r['would_take_again_pct']:.0f}%" if r["would_take_again_pct"] is not None else "n/a"
+
+
+def comparison_table(rec: Recommendation) -> pd.DataFrame:
+    """One row per instructor so options can be compared at a glance before reading any card."""
+    ranked = rec.mode == "ranked"
+    rows = []
+    for c in rec.candidates:
+        r = c.rmp_site
+        row = {}
+        if ranked:      # rank and fit mean nothing before a request, so those columns appear only with one
+            row["Rank"] = c.rank if c.rank else ""
+        row["Instructor"] = c.name
+        if ranked:
+            row["Fit"] = f"{round(c.combined * 100)}/100" if c.combined is not None else ""
+        row.update({
+            "RMP quality": f"{r['avg_rating']}/5" if r else "",
+            "RMP difficulty": f"{r['avg_difficulty']}/5" if r else "",
+            "Would retake": _retake(r) if r else "",
+            "Reviews analyzed": f"{c.n_reviews} ({CONF_LABEL[c.confidence]})" if c.n_reviews else "none",
+            "Sections": len(c.sections),
+        })
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def render_candidate(c: Candidate, mode: str) -> None:
     with st.container(border=True):
         left, right = st.columns([3, 1])
@@ -87,38 +146,37 @@ def render_candidate(c: Candidate, mode: str) -> None:
             st.info("This instructor has an RMP profile but no collected reviews.")
         if c.rmp_site:
             r = c.rmp_site
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("RMP quality", f"{r['avg_rating']}/5")
-            m2.metric("RMP difficulty", f"{r['avg_difficulty']}/5")
-            m3.metric("Would retake", f"{r['would_take_again_pct']:.0f}%" if r["would_take_again_pct"] is not None else "n/a")
-            m4.metric("RMP ratings", r["num_ratings"])
-            st.caption(f"RateMyProfessors totals for this professor. This app analyzed {c.n_reviews} collected review(s) from "
-                       f"{c.scope_label} ({CONF_LABEL[c.confidence]}); newest {c.last_review_date}."
+            st.markdown(f"RateMyProfessors: **{r['avg_rating']}/5** quality · **{r['avg_difficulty']}/5** difficulty · "
+                        f"**{_retake(r)}** would retake · **{r['num_ratings']}** ratings")
+            newest = f"; newest {nice_date(c.last_review_date)}" if c.last_review_date else ""
+            st.caption(f"This app analyzed {c.n_reviews} collected review(s) from {c.scope_label} "
+                       f"({CONF_LABEL[c.confidence]}){newest}."
                        + (f" [Open RMP profile]({c.rmp_url})" if c.rmp_url else ""))
-        if c.trait_lines:
-            for ln in c.trait_lines:
-                want = "more" if ln.direction == "prefer" else "less"
-                pct_txt = (ordinal(round(ln.score * 100)) + " percentile among IT instructors"
-                           if ln.score is not None else "no evidence")
-                counts = (f"{ln.n_pos} review(s) show it, {ln.n_neg} show the opposite, of {ln.n_reviews}"
-                          if TRAITS[ln.trait].pos_tags or TRAITS[ln.trait].neg_tags
-                          or TRAITS[ln.trait].pos_patterns or TRAITS[ln.trait].neg_patterns
-                          else f"based on star ratings of {ln.n_reviews} review(s)")
-                st.markdown(f"- **{ln.trait.replace('_', ' ')}** (you want {want}): {pct_txt} · {counts}")
         st.markdown("**Sections**")
         st.dataframe(sections_table(c), hide_index=True, width="stretch")
         quotes = [e for e in c.evidence if e.kind in ("quote", "keyword")]
         stats = [e for e in c.evidence if e.kind == "tag_stat"]
-        if quotes or stats:
-            with st.expander("Evidence from reviews"):
+        if c.trait_lines or quotes or stats:
+            # The top pick (or the only instructor) opens by default; the rest stay folded so the page
+            # does not become a wall of text when comparing four or five professors.
+            with st.expander("Why this fit, with review evidence", expanded=(c.rank == 1 or mode == "single")):
+                for ln in c.trait_lines:
+                    want = "more" if ln.direction == "prefer" else "less"
+                    pct_txt = (ordinal(round(ln.score * 100)) + " percentile among IT instructors"
+                               if ln.score is not None else "no evidence")
+                    counts = (f"{ln.n_pos} review(s) show it, {ln.n_neg} show the opposite, of {ln.n_reviews}"
+                              if TRAITS[ln.trait].pos_tags or TRAITS[ln.trait].neg_tags
+                              or TRAITS[ln.trait].pos_patterns or TRAITS[ln.trait].neg_patterns
+                              else f"based on star ratings of {ln.n_reviews} review(s)")
+                    st.markdown(f"- **{ln.trait.replace('_', ' ')}** (you want {want}): {pct_txt} · {counts}")
                 for e in stats:
                     st.markdown(f"- {e.text}")
                 for e in quotes:
-                    icon = {True: "✅ supports your preference", False: "⚠️ caution", None: "🔎 matches your keywords"}[e.supports]
-                    st.markdown(f"{icon} · *{e.trait.replace('_', ' ')}*\n\n> “{esc(e.text)}”")
+                    label = {True: "Supports your preference", False: "Caution", None: "Matches your keywords"}[e.supports]
+                    st.markdown(f"**{label}** · *{e.trait.replace('_', ' ')}*\n\n> “{esc(e.text)}”")
                     st.caption(f"review {e.review_id} · {e.date} · {e.course or 'course not labeled'}")
         for n in c.notes:
-            st.caption(f"ℹ️ {n}")
+            st.caption(n)
 
 
 def render_result(rec: Recommendation) -> None:
@@ -126,7 +184,7 @@ def render_result(rec: Recommendation) -> None:
         st.warning("No sections of this course match your schedule filters.")
     elif rec.mode == "list":
         st.markdown(f"**{len(rec.candidates)} instructor group(s)** teach {rec.course.label} this term. "
-                    f"Describe the professor you want below to rank them.")
+                    f"Describe the professor you want, or pick an example, to rank them.")
     elif rec.mode == "single":
         st.success(f"Only one instructor teaches {rec.course.label} this term, so there is nothing to compare. "
                    f"Here are all matching sections and what reviews say.")
@@ -135,7 +193,9 @@ def render_result(rec: Recommendation) -> None:
             st.info("I didn't recognize specific preferences, so the options are ordered by overall rating.")
         st.markdown(f"**{sum(1 for c in rec.candidates if c.rank)} ranked option(s)** for {rec.course.label}, best fit first.")
     for n in rec.notes:
-        st.caption(f"ℹ️ {n}")
+        st.caption(n)
+    if len(rec.candidates) > 1:
+        st.dataframe(comparison_table(rec), hide_index=True, width="stretch")
     for c in rec.candidates:
         render_candidate(c, rec.mode)
     if rec.excluded:
@@ -144,12 +204,33 @@ def render_result(rec: Recommendation) -> None:
                 st.markdown(f"- Section {s.section_number} ({s.instructor or 'TBA'}), {s.schedule_text}: {'; '.join(why)}")
 
 
+def understood_summary(req: ParsedRequest) -> str:
+    """One readable line: what the request was turned into."""
+    parts = [f"{'more' if c.direction == 'prefer' else 'less'} {c.name.replace('_', ' ')}" for c in req.criteria]
+    parts += [f"“{k}” in reviews" for k in req.keywords]
+    cons = req.constraints
+    if cons.avoid_days:
+        parts.append("no " + "/".join(cons.avoid_days))
+    if cons.earliest_start:
+        parts.append(f"start {cons.earliest_start} or later")
+    if cons.latest_end:
+        parts.append(f"end by {cons.latest_end}")
+    if cons.delivery != "any":
+        parts.append(cons.delivery.replace("_", " "))
+    return ", ".join(parts) if parts else "no specific preferences recognized"
+
+
 def interpretation_panel(req: ParsedRequest, rid: int) -> ParsedRequest:
-    """Show how the request was understood and let the student edit it. Re-ranking needs no AI call."""
-    with st.expander("How I understood your request (you can edit this)", expanded=True):
+    """Show how the request was understood and let the student edit it. Re-ranking needs no AI call.
+
+    Collapsed by default: the one-line summary is enough for most requests, and the results should be
+    the first thing on screen, not a table editor.
+    """
+    if req.unsupported:
+        st.warning("Reviews and schedules can't answer: " + "; ".join(req.unsupported))
+    summary_slot = st.empty()       # filled after the edit widgets run, so it reflects edits
+    with st.expander("Edit how I understood your request", expanded=False):
         st.caption(f"Parsed by: {req.parsed_by}")
-        if req.unsupported:
-            st.warning("Reviews and schedules can't answer: " + "; ".join(req.unsupported))
         df = pd.DataFrame([{"trait": c.name, "direction": c.direction, "weight": c.weight} for c in req.criteria],
                           columns=["trait", "direction", "weight"])
         edited = st.data_editor(
@@ -175,10 +256,12 @@ def interpretation_panel(req: ParsedRequest, rid: int) -> ParsedRequest:
         if row.get("trait") in TRAIT_NAMES and row.get("direction") in ("prefer", "avoid"):
             w = row.get("weight")
             crits.append(Criterion(name=row["trait"], direction=row["direction"], weight=1.0 if pd.isna(w) else w))
-    return ParsedRequest(
+    final = ParsedRequest(
         criteria=crits, keywords=[k for k in kw.split(",") if k.strip()],
         constraints=ScheduleConstraints(earliest_start=es or None, latest_end=le or None, avoid_days=ad, delivery=dl),
         unsupported=req.unsupported, parsed_by=req.parsed_by, original_text=req.original_text)
+    summary_slot.markdown(f"**Understood as:** {understood_summary(final)}")
+    return final
 
 
 # ---------------------------------------------------------------------------------------------
@@ -189,19 +272,23 @@ engine.refresh_if_stale()       # cheap hash check; rebuilds the cache only if a
 as_of = engine.as_of()
 
 with st.sidebar:
-    st.header("Settings")
     key = gemini_key()
-    mode = st.radio("Request understanding", ["Gemini (falls back to offline rules)", "Offline rules only"],
-                    index=0 if key else 1, disabled=not key,
-                    help="Gemini only reads your typed request. It never sees professor or review data.")
-    if not key:
-        st.caption(f"No Gemini key found (set the {config.GEMINI_API_KEY_ENV} environment variable). Using offline rules.")
-    st.divider()
-    st.caption(f"Courses: {as_of['term']} (retrieved {as_of['courses_retrieved']})\n\n"
-               f"Reviews: {as_of['n_reviews']} from RateMyProfessors, through {as_of['reviews_through']}")
+    if key:
+        st.subheader("Reading your request")
+        mode = st.radio("Method", ["Gemini (falls back to offline rules)", "Offline rules only"], index=0,
+                        help="Gemini only reads your typed request. It never sees professor or review data.")
+    else:
+        # A greyed-out radio with one live option is clutter; say what is happening and how to change it.
+        mode = "Offline rules only"
+        st.subheader("Reading your request")
+        st.caption(f"Using built-in rules, which understand common phrases. Set {config.GEMINI_API_KEY_ENV} "
+                   "to let Gemini read free-form wording.")
+    st.subheader("About the data")
+    st.caption(f"Schedule: {as_of['term']}, retrieved {nice_date(as_of['courses_retrieved'])}.")
+    st.caption(f"Reviews: {int(as_of['n_reviews'] or 0):,} from RateMyProfessors, newest {nice_date(as_of['reviews_through'])}.")
 parser = get_parser("rules" if (not key or mode.startswith("Offline")) else "gemini", key)
 
-st.title("🎓 Professor Match")
+st.title("Professor Match")
 st.caption("Pick a course, describe the professor you want, and see matching sections with the review evidence behind each recommendation.")
 
 courses = engine.courses()
@@ -210,15 +297,30 @@ course = st.selectbox("Course", courses, index=None, format_func=lambda c: c.dis
 
 if "req_id" not in st.session_state:
     st.session_state.req_id = 0
-prompt = st.chat_input("What kind of professor do you want? e.g. easy-going and helpful, no Friday classes")
-if prompt:
-    if course is None:
-        st.warning("Choose a course first, then describe the professor you want.")
-    else:
-        with st.spinner("Understanding your request…"):
-            req = parser.parse(prompt)
-        st.session_state.req_id += 1
-        st.session_state.last = req.model_dump()
+# Inside a container the chat box renders inline under the course picker. Pinned to the page bottom,
+# Streamlit makes the whole page a "scroll to bottom" container and drags the view down on every rerun.
+
+
+def _queue_example() -> None:
+    """Chip clicked: hand its text to the normal request flow on the next run, then clear the chip."""
+    pick = st.session_state.get("example_pick")
+    if pick:
+        st.session_state.queued_prompt = pick
+        st.session_state.example_pick = None
+
+
+with st.container():
+    prompt = st.chat_input(
+        "What kind of professor do you want? e.g. easy-going and helpful, no Friday classes" if course is not None
+        else "Choose a course first", disabled=course is None)
+    if course is not None:
+        st.pills("Or try an example", EXAMPLE_REQUESTS, key="example_pick", on_change=_queue_example)
+prompt = st.session_state.pop("queued_prompt", None) or prompt
+if prompt and course is not None:
+    with st.spinner("Understanding your request…"):
+        req = parser.parse(prompt)
+    st.session_state.req_id += 1
+    st.session_state.last = req.model_dump()
 
 last = st.session_state.get("last")
 if course is not None and last is None:
@@ -230,8 +332,8 @@ elif course is not None and last is not None:
     with st.chat_message("assistant"):
         req = interpretation_panel(req0, st.session_state.req_id)
         render_result(engine.recommend(course.number, req))
-elif course is None:
-    st.info("Start by choosing a course above.")
+else:
+    st.caption("Choose a course to see who teaches it this term and which sections are open.")
 
 st.divider()
 st.caption("Fit scores estimate how well review language matches your request; they do not measure teaching quality. "

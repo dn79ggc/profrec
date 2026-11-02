@@ -1,6 +1,8 @@
 """Plain-text rendering of a Recommendation (CLI, tests, logs). Every number comes from the engine result."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from .engine import Recommendation
 
 
@@ -54,3 +56,14 @@ def to_text(rec: Recommendation, max_quotes: int = 3) -> str:
             out.append(f"   sec {s.section_number} (CRN {s.crn}) · {s.schedule_text} · {s.place_text} · {s.seats_available} seats open")
         out.extend(f"   note: {n}" for n in c.notes)
     return "\n".join(out)
+
+
+def nice_date(iso: str) -> str:
+    """'2026-10-22' -> 'Oct 22, 2026'. Unparseable input is returned unchanged.
+
+    Also stops the sidebar from wrapping a date at its hyphens.
+    """
+    try:
+        return datetime.strptime(str(iso)[:10], "%Y-%m-%d").strftime("%b %d, %Y").replace(" 0", " ")
+    except ValueError:
+        return str(iso)

@@ -3,3 +3,33 @@ gatherUsageStats = false
 
 [server]
 headless = true
+
+# Soft themes. Same hue family in both (warm neutrals + one muted sage accent), so switching
+# changes lightness, not identity. Body text is ~11-12:1 against its background (WCAG AA needs 4.5:1)
+# instead of the 21:1 of pure black on pure white. Chosen for: low glare in a dark dorm room,
+# no glare on a sunny campus, and a calm tone for a tool students open before registration.
+[theme.light]
+primaryColor = "#3E6B55"
+backgroundColor = "#F2EFE7"
+secondaryBackgroundColor = "#E7E3D8"
+textColor = "#2E2C28"
+linkColor = "#2F6650"
+borderColor = "#D3CEC0"
+blueColor = "#4F7385"
+greenColor = "#4C7A5C"
+orangeColor = "#98642A"
+redColor = "#B5524A"
+
+[theme.dark]
+# Streamlit paints white text on primary-colored chips; this green keeps that at 4.7:1
+# and still reads 3.2:1 against the dark background (a UI-component pass is 3:1).
+primaryColor = "#4F7D66"
+backgroundColor = "#222623"
+secondaryBackgroundColor = "#2C312D"
+textColor = "#DCD8CD"
+linkColor = "#9CC4AD"
+borderColor = "#41483F"
+blueColor = "#86AABB"
+greenColor = "#8DB59E"
+orangeColor = "#D2A15E"
+redColor = "#D98880"

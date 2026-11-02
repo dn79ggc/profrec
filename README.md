@@ -62,6 +62,16 @@ Run the tests: `python -m pytest -q`.
 
 "Easy-going" is not its own trait: it maps to avoid `difficulty` + avoid `strict_grading` + prefer `flexibility` (+ `helpfulness` if asked).
 
+## Look and feel
+
+- Themes live in `.streamlit/config.toml` (`[theme.light]`, `[theme.dark]`): one muted sage accent on warm neutrals in both, body text about 11:1 contrast instead of pure black on white. Switch with the three-dot menu (System / Light / Dark). That menu loses the theme items under `toolbarMode = "viewer"`, so only the Deploy button is hidden (CSS in `app.py`).
+- Theme switches cross-fade over about 0.4 s (CSS in `app.py`); users with "reduce motion" set in their OS get an instant switch.
+- Captions and quotes fade their text color rather than using Streamlit's `opacity: 0.6`, which fell below WCAG AA on this palette.
+- The chat box is inline under the course picker on purpose. A page-pinned `st.chat_input` makes Streamlit scroll the whole page to the bottom on every rerun (`tests/test_app_smoke.py` guards this). It stays disabled until a course is chosen.
+- Starter requests (`src/profrec/examples.py`) appear as chips under the chat box and run through the normal request flow. A test checks each one works offline.
+- Results lead with a one-line "Understood as" summary and a comparison table. The editable parse panel is collapsed, and only the top pick's "Why this fit" panel opens by default.
+- Known limit: the tables are drawn on a canvas by Streamlit, so they change color instantly instead of fading.
+
 ## Alias files
 
 - `data/course_aliases.json`: extra names for a course in the dropdown search, e.g. `{"2150": ["intermediate programming"]}`.
