@@ -1,0 +1,9 @@
+[project]
+name = "profrec"
+version = "0.1.0"
+description = "Professor and course recommendation MVP for GGC ITEC courses (SQLite + review lexicon + Gemini request parsing)"
+requires-python = ">=3.11"
+dependencies = ["streamlit>=1.50", "google-genai>=1.0", "pydantic>=2.5", "pandas>=2.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

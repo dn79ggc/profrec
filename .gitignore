@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Derived data: rebuilt automatically from data/ on first run
+cache/
+
+# Secrets
+.env
+.env.*
+.streamlit/secrets.toml
+
+# Databases used for the app
+data/*.sqlite
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

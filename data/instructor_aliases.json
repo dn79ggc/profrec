@@ -1,0 +1,4 @@
+{
+  "_comment": "Maps an instructor name as it appears in the course schedule to the exact instructor_name in the RMP database, for cases the automatic name matching cannot join (it already ignores case, accents, punctuation and parenthetical parts like 'Jeffrey (J. P.) Zinn'). Example: {\"schedule_to_rmp\": {\"Bob Smith\": \"Robert Smith\"}}. The cache builder prints a warning for any schedule instructor it cannot match and that is not in the RMP 'unmatched' list.",
+  "schedule_to_rmp": {}
+}

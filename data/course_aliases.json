@@ -1,0 +1,4 @@
+{
+  "_comment": "Extra search words for the course dropdown, keyed by course number. They only help a student FIND a course; they add no claims about professors. Keep entries evidence-based (e.g. RMP reviews of ITEC2150 call it 'intermediate programming').",
+  "2150": ["intermediate programming"]
+}
