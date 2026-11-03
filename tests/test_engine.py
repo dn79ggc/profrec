@@ -1,3 +1,4 @@
+from profrec.engine import is_full
 from profrec.parser import RuleBasedParser
 from profrec.schema import Criterion, ParsedRequest, ScheduleConstraints
 
@@ -78,3 +79,30 @@ def test_no_instructor_name_invented(engine):
     for course in engine.courses():
         for c in engine.recommend(course.number, listing_only=True).candidates:
             assert c.name in names or c.name.upper().startswith("TBA") or c.status == "tba"
+
+
+def test_open_only_drops_full_sections_and_says_why(engine):
+    everyone = engine.recommend("3600", listing_only=True)
+    open_only = engine.recommend("3600", listing_only=True, open_only=True)
+    assert sum(len(c.sections) for c in everyone.candidates) == 2
+    assert open_only.open_only and all(not is_full(s) for c in open_only.candidates for s in c.sections)
+    assert [why for _, why in open_only.excluded] == [["full (0 seats open)"]]
+    assert open_only.mode == "single"            # one instructor still has seats
+
+
+def test_open_only_with_every_section_full_is_no_sections(engine):
+    assert engine.recommend("4310", open_only=True).mode == "no_sections"
+    assert engine.recommend("4310").mode == "single"
+
+
+def test_open_only_off_changes_nothing(engine):
+    a = engine.recommend("2150", listing_only=True)
+    b = engine.recommend("2150", listing_only=True, open_only=False)
+    assert [c.name for c in a.candidates] == [c.name for c in b.candidates] and not b.excluded
+
+
+def test_is_full_uses_seat_count_and_never_guesses():
+    from profrec.engine import SectionInfo
+    mk = lambda seats: SectionInfo("1", "01", "9999", "t", None, None, "", None, None, None, None, None, None, None,
+                                   seats, 0, 0, True)
+    assert is_full(mk(0)) and not is_full(mk(3)) and not is_full(mk(None))

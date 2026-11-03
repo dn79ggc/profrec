@@ -7,7 +7,7 @@ streamlit_testing = pytest.importorskip("streamlit.testing.v1")
 
 from profrec.examples import EXAMPLE_REQUESTS  # noqa: E402
 from profrec.parser import RuleBasedParser  # noqa: E402
-from profrec.render import nice_date  # noqa: E402
+from profrec.render import nice_date, nice_range  # noqa: E402
 
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
 
@@ -73,6 +73,54 @@ def test_new_session_returns_to_the_first_screen(built):
     at.chat_input[0].set_value("easy-going").run()
     assert not at.exception
     assert [s.value for s in at.subheader][0].startswith("#1")
+
+
+def _pick(at, number):
+    at.selectbox[0].select(next(o for o in at.selectbox[0].options if number in o)).run()
+
+
+def test_every_section_has_a_copyable_crn(built):
+    at = _app(built)
+    _pick_2150(at)
+    crns = [c.value for c in at.code]
+    assert len(crns) == 5 and all(v.isdigit() for v in crns)    # one per section, plain digits so the copy is exact
+
+
+def test_hide_full_sections_toggle(built):
+    at = _app(built)
+    _pick(at, "3600")                                            # two instructors, one section is full
+    assert len(at.code) == 2
+    at.toggle(key="hide_full").set_value(True).run()
+    assert not at.exception
+    assert len(at.code) == 1
+    # one instructor left: the page must not claim only one instructor teaches the course
+    assert any("has open seats" in s.value for s in at.success)
+    at.toggle(key="hide_full").set_value(False).run()
+    assert len(at.code) == 2
+
+
+def test_hide_full_with_nothing_open_says_so(built):
+    at = _app(built)
+    _pick(at, "4310")                                            # its only section is full
+    at.toggle(key="hide_full").set_value(True).run()
+    assert not at.exception
+    assert [w.value for w in at.warning] == ["No sections of this course match your filters."]
+
+
+def test_new_session_also_clears_the_toggle(built):
+    at = _app(built)
+    _pick(at, "3600")
+    at.toggle(key="hide_full").set_value(True).run()
+    at.button(key="new_session").click().run()
+    assert not at.toggle                         # no course, so no toggle yet
+    _pick(at, "3600")
+    assert at.toggle(key="hide_full").value is False
+    assert len(at.code) == 2                     # the full section is back
+
+
+def test_nice_range():
+    assert nice_range("2027-01-11", "2027-05-11") == "Jan 11 – May 11, 2027"
+    assert nice_range("2026-12-15", "2027-01-05") == "Dec 15, 2026 – Jan 5, 2027"
 
 
 def test_comparison_table_lists_every_instructor(built):

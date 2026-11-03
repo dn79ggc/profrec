@@ -67,3 +67,11 @@ def nice_date(iso: str) -> str:
         return datetime.strptime(str(iso)[:10], "%Y-%m-%d").strftime("%b %d, %Y").replace(" 0", " ")
     except ValueError:
         return str(iso)
+
+
+def nice_range(start: str, end: str) -> str:
+    """'2027-01-11','2027-05-11' -> 'Jan 11 – May 11, 2027' (year shown once when it is shared)."""
+    a, b = nice_date(start), nice_date(end)
+    if a[-4:] == b[-4:] and a[-4:].isdigit() and a != start and b != end:
+        return f"{a[:-6]} – {b}"
+    return f"{a} – {b}"

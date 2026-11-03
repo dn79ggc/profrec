@@ -148,6 +148,7 @@ class Recommendation:
     default_criteria_used: bool = False
     notes: list[str] = field(default_factory=list)
     as_of: dict = field(default_factory=dict)
+    open_only: bool = False                      # full sections were hidden on request
 
 
 # --------------------------------------------------------------------------------------------
@@ -157,8 +158,16 @@ def _confidence_note(c: Candidate) -> str:
     return {"none": "no reviews", "low": "very few reviews", "medium": "some reviews", "high": "many reviews"}[c.confidence]
 
 
-def _violations(s: SectionInfo, cons) -> list[str]:
+def is_full(s: SectionInfo) -> bool:
+    """No seats left, judged by the seat count the student sees. (The source's open_section flag disagrees
+    with it for one section, so the flag is not used.) Unknown seat counts are never called full."""
+    return s.seats_available is not None and s.seats_available <= 0
+
+
+def _violations(s: SectionInfo, cons, open_only: bool = False) -> list[str]:
     why: list[str] = []
+    if open_only and is_full(s):
+        why.append("full (0 seats open)")
     if cons.delivery == "online" and not s.online:
         why.append("not online")
     if cons.delivery == "in_person" and s.online:
@@ -236,34 +245,37 @@ class Engine:
 
     # ---- main entry --------------------------------------------------------------------
     def recommend(self, course_number: str, request: ParsedRequest | None = None,
-                  listing_only: bool = False) -> Recommendation:
-        """listing_only=True returns every section grouped by instructor, unranked (no preferences yet)."""
+                  listing_only: bool = False, open_only: bool = False) -> Recommendation:
+        """listing_only=True returns every section grouped by instructor, unranked (no preferences yet).
+        open_only=True drops sections with no seats left (reported in rec.excluded like schedule filters)."""
         request = request or ParsedRequest()
         conn = self._conn()
         try:
-            return self._recommend(conn, course_number, request, listing_only)
+            return self._recommend(conn, course_number, request, listing_only, open_only)
         finally:
             conn.close()
 
-    def _recommend(self, conn, course_number: str, request: ParsedRequest, listing_only: bool = False) -> Recommendation:
+    def _recommend(self, conn, course_number: str, request: ParsedRequest, listing_only: bool = False,
+                   open_only: bool = False) -> Recommendation:
         crow = conn.execute("SELECT * FROM courses WHERE course_number=?", (course_number,)).fetchone()
         if not crow:
             raise KeyError(f"unknown course {course_number!r}")
         course = CourseOption(crow["course_number"], crow["title"], crow["label"],
                               json.loads(crow["aliases_json"] or "[]"), crow["n_sections"], crow["n_instructors"])
         cbase = crow["base"]
-        rec = Recommendation(course=course, mode="ranked", request=request, candidates=[], as_of=self.as_of())
+        rec = Recommendation(course=course, mode="ranked", request=request, candidates=[], as_of=self.as_of(),
+                             open_only=open_only)
 
         sections = self._sections(conn, course_number)
         eligible: list[SectionInfo] = []
         for s in sections:
-            why = _violations(s, request.constraints)
+            why = _violations(s, request.constraints, open_only)
             if why:
                 rec.excluded.append((s, why))
             else:
                 eligible.append(s)
         if rec.excluded:
-            rec.notes.append(f"{len(rec.excluded)} of {len(sections)} sections were removed by your schedule filters.")
+            rec.notes.append(f"{len(rec.excluded)} of {len(sections)} sections were removed by your filters.")
         if not eligible:
             rec.mode = "no_sections"
             return rec

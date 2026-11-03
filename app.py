@@ -18,10 +18,10 @@ import streamlit as st  # noqa: E402
 
 from profrec import config  # noqa: E402
 from profrec.criteria import TRAIT_NAMES, TRAITS  # noqa: E402
-from profrec.engine import Candidate, Engine, Recommendation  # noqa: E402
+from profrec.engine import Candidate, Engine, Recommendation, is_full  # noqa: E402
 from profrec.examples import EXAMPLE_REQUESTS  # noqa: E402
 from profrec.parser import FallbackParser, GeminiParser, ParserError, RuleBasedParser  # noqa: E402
-from profrec.render import nice_date, ordinal  # noqa: E402
+from profrec.render import nice_date, nice_range, ordinal  # noqa: E402
 from profrec.schema import Criterion, ParsedRequest, ScheduleConstraints  # noqa: E402
 
 st.set_page_config(page_title="Professor Match", page_icon="🎓", layout="wide")
@@ -66,6 +66,35 @@ st.html("""
   width: auto;
 }
 .st-key-new_session button { min-height: 2.25rem; padding: 0.25rem 0.8rem; }
+/* CRN boxes: Streamlit shows a code block's copy button only while hovered. A phone has no hover, so the
+   button would stay invisible until a first tap on the box. Keep it showing everywhere. */
+[class*="st-key-sec_"] [data-testid="stCode"] div, [class*="st-key-sec_"] [data-testid="stCode"] span {
+  opacity: 1 !important; visibility: visible !important;
+}
+
+/* Phones: the stack above the results (title, intro, course, chat, four stacked chips, toggle) is about
+   two screens tall, so results start far below the fold. Tighter top padding and title, the chips in one
+   swipeable row (the cut-off chip at the edge shows it scrolls), and 44 px tap targets for the controls
+   people use most. Desktop is untouched. */
+@media (max-width: 640px) {
+  [data-testid="stMainBlockContainer"] { padding-top: 4.25rem; }
+  [data-testid="stMainBlockContainer"] h1 { font-size: 2.1rem; }
+  .st-key-example_pick [data-testid="stButtonGroup"] > div {
+    flex-wrap: nowrap; overflow-x: auto; padding: 3px; scroll-snap-type: x proximity;
+  }
+  .st-key-example_pick button { flex: none; min-height: 2.75rem; scroll-snap-align: start; }
+  .st-key-new_session { top: 0.5rem; right: 3.4rem; }
+  .st-key-new_session button { min-height: 2.75rem; }
+  /* Chat avatars cost 40 px of width on a 390 px screen; the tinted bubble already marks the user's message. */
+  [data-testid="stChatMessageAvatarUser"], [data-testid="stChatMessageAvatarAssistant"] { display: none; }
+  [data-testid="stMainBlockContainer"] h3 { font-size: 1.5rem; }
+  /* Streamlit stacks columns on phones; keep a section's details and its CRN copy box side by side. */
+  [class*="st-key-sec_"] [data-testid="stHorizontalBlock"] { flex-direction: row !important; flex-wrap: nowrap !important; }
+  [class*="st-key-sec_"] [data-testid="stColumn"]:first-child { flex: 1 1 0 !important; min-width: 0 !important; width: auto !important; }
+  [class*="st-key-sec_"] [data-testid="stColumn"]:last-child { flex: 0 0 7.5rem !important; min-width: 7.5rem !important; width: 7.5rem !important; }
+  [class*="st-key-sec_"] [data-testid="stCode"] { min-height: 3.5rem; }
+  [class*="st-key-sec_"] [data-testid="stCode"] button { min-width: 2.75rem; min-height: 2.75rem; }
+}
 [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
   background-color: color-mix(in srgb, currentColor 7%, transparent);
 }
@@ -88,6 +117,7 @@ def new_session() -> None:
     """
     st.session_state["course"] = None
     st.session_state["example_pick"] = None
+    st.session_state["hide_full"] = False
     for k in ("last", "queued_prompt"):
         st.session_state.pop(k, None)
 
@@ -132,12 +162,22 @@ def esc(text: str) -> str:
 # ---------------------------------------------------------------------------------------------
 # rendering
 # ---------------------------------------------------------------------------------------------
-def sections_table(c: Candidate) -> pd.DataFrame:
-    return pd.DataFrame([{
-        "Section": s.section_number, "CRN": s.crn, "Days & time": s.schedule_text, "Where": s.place_text,
-        "Seats open": f"{s.seats_available} of {s.max_enrollment}" if s.max_enrollment is not None else s.seats_available,
-        "Dates": f"{s.start_date} → {s.end_date}" if s.start_date else "",
-    } for s in c.sections])
+def seats_text(s) -> str:
+    if s.seats_available is None:
+        return "seats unknown"
+    of = f" of {s.max_enrollment}" if s.max_enrollment is not None else ""
+    return f"FULL, 0{of} seats open" if is_full(s) else f"{s.seats_available}{of} seats open"
+
+
+def render_section(s) -> None:
+    """One section: details on the left, the CRN in a code box whose built-in button copies it
+    (registration asks for the CRN, and a dataframe cell has no copy affordance)."""
+    with st.container(key=f"sec_{s.crn}"):
+        info, crn = st.columns([4, 1], vertical_alignment="center", gap="small")
+        dates = f"  \n{nice_range(s.start_date, s.end_date)}" if s.start_date and s.end_date else ""
+        info.markdown(f"**Section {s.section_number}** · {s.schedule_text}  \n{s.place_text} · **{seats_text(s)}**{dates}")
+        crn.caption("CRN")
+        crn.code(s.crn, language=None)
 
 
 def _retake(r: dict) -> str:
@@ -191,7 +231,8 @@ def render_candidate(c: Candidate, mode: str) -> None:
                        f"({CONF_LABEL[c.confidence]}){newest}."
                        + (f" [Open RMP profile]({c.rmp_url})" if c.rmp_url else ""))
         st.markdown("**Sections**")
-        st.dataframe(sections_table(c), hide_index=True, width="stretch")
+        for sec in c.sections:
+            render_section(sec)
         quotes = [e for e in c.evidence if e.kind in ("quote", "keyword")]
         stats = [e for e in c.evidence if e.kind == "tag_stat"]
         if c.trait_lines or quotes or stats:
@@ -219,13 +260,17 @@ def render_candidate(c: Candidate, mode: str) -> None:
 
 def render_result(rec: Recommendation) -> None:
     if rec.mode == "no_sections":
-        st.warning("No sections of this course match your schedule filters.")
+        st.warning("No sections of this course match your filters.")
     elif rec.mode == "list":
         st.markdown(f"**{len(rec.candidates)} instructor group(s)** teach {rec.course.label} this term. "
                     f"Describe the professor you want, or pick an example, to rank them.")
     elif rec.mode == "single":
-        st.success(f"Only one instructor teaches {rec.course.label} this term, so there is nothing to compare. "
-                   f"Here are all matching sections and what reviews say.")
+        if rec.open_only and rec.excluded:
+            st.success(f"Only one instructor has open seats in {rec.course.label}, so there is nothing to compare. "
+                       f"Here are their sections and what reviews say. Turn off “Hide full sections” to see everyone.")
+        else:
+            st.success(f"Only one instructor teaches {rec.course.label} this term, so there is nothing to compare. "
+                       f"Here are all matching sections and what reviews say.")
     else:
         if rec.default_criteria_used:
             st.info("I didn't recognize specific preferences, so the options are ordered by overall rating.")
@@ -237,7 +282,7 @@ def render_result(rec: Recommendation) -> None:
     for c in rec.candidates:
         render_candidate(c, rec.mode)
     if rec.excluded:
-        with st.expander(f"{len(rec.excluded)} section(s) hidden by your schedule filters"):
+        with st.expander(f"{len(rec.excluded)} section(s) hidden by your filters"):
             for s, why in rec.excluded:
                 st.markdown(f"- Section {s.section_number} ({s.instructor or 'TBA'}), {s.schedule_text}: {'; '.join(why)}")
 
@@ -349,7 +394,7 @@ def _queue_example() -> None:
 
 with st.container():
     prompt = st.chat_input(
-        "What kind of professor do you want? e.g. easy-going and helpful, no Friday classes" if course is not None
+        "Describe the professor you want" if course is not None
         else "Choose a course first", disabled=course is None)
     if course is not None:
         st.pills("Or try an example", EXAMPLE_REQUESTS, key="example_pick", on_change=_queue_example)
@@ -360,16 +405,21 @@ if prompt and course is not None:
     st.session_state.req_id += 1
     st.session_state.last = req.model_dump()
 
+hide_full = False
+if course is not None:
+    hide_full = st.toggle("Hide full sections", key="hide_full")
+    st.caption(f"Seats as of {nice_date(as_of['courses_retrieved'])}; they may have changed.")
+
 last = st.session_state.get("last")
 if course is not None and last is None:
-    render_result(engine.recommend(course.number, ParsedRequest(), listing_only=True))
+    render_result(engine.recommend(course.number, ParsedRequest(), listing_only=True, open_only=hide_full))
 elif course is not None and last is not None:
     req0 = ParsedRequest.model_validate(last)
     with st.chat_message("user"):
         st.write(req0.original_text)
     with st.chat_message("assistant"):
         req = interpretation_panel(req0, st.session_state.req_id)
-        render_result(engine.recommend(course.number, req))
+        render_result(engine.recommend(course.number, req, open_only=hide_full))
 else:
     st.caption("Choose a course to see who teaches it this term and which sections are open.")
 
