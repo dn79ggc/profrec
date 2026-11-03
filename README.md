@@ -68,6 +68,8 @@ Run the tests: `python -m pytest -q`.
 - Theme switches cross-fade over about 0.4 s (CSS in `app.py`); users with "reduce motion" set in their OS get an instant switch.
 - Captions and quotes fade their text color rather than using Streamlit's `opacity: 0.6`, which fell below WCAG AA on this palette.
 - The chat box is inline under the course picker on purpose. A page-pinned `st.chat_input` makes Streamlit scroll the whole page to the bottom on every rerun (`tests/test_app_smoke.py` guards this). It stays disabled until a course is chosen.
+- The chat box has a 2 px sage outline (about 5:1 against the page in both themes, WCAG asks 3:1 for UI edges) and a separate focus ring.
+- "New session" sits top right, left of the three-dot menu (fixed-position CSS keyed on `new_session`). It clears the course, results and queued example without reloading the page. The course picker is keyed so it actually resets; the request counter is kept on purpose because the edit widgets are keyed by it. It has no `help=` tooltip because Streamlit then adds a hidden duplicate button that takes a Tab stop. Known quirk: Tab reaches the three-dot menu just before this button.
 - Starter requests (`src/profrec/examples.py`) appear as chips under the chat box and run through the normal request flow. A test checks each one works offline.
 - Results lead with a one-line "Understood as" summary and a comparison table. The editable parse panel is collapsed, and only the top pick's "Why this fit" panel opens by default.
 - Known limit: the tables are drawn on a canvas by Streamlit, so they change color instantly instead of fading.

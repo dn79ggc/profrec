@@ -57,6 +57,24 @@ def test_example_chip_runs_a_request(built):
     assert [s.value for s in at.subheader][0].startswith("#1")
 
 
+def test_new_session_returns_to_the_first_screen(built):
+    at = _app(built)
+    _pick_2150(at)
+    at.chat_input[0].set_value("helpful").run()
+    assert [s.value for s in at.subheader][0].startswith("#1")
+
+    at.button(key="new_session").click().run()
+    assert not at.exception
+    assert at.selectbox[0].value is None          # course cleared (the widget is keyed, so this really resets it)
+    assert at.chat_input[0].disabled              # chat waits for a course again
+    assert not [s for s in at.subheader if s.value.startswith("#")]   # no leftover results
+
+    _pick_2150(at)                                # and a fresh run works afterwards
+    at.chat_input[0].set_value("easy-going").run()
+    assert not at.exception
+    assert [s.value for s in at.subheader][0].startswith("#1")
+
+
 def test_comparison_table_lists_every_instructor(built):
     at = _app(built)
     _pick_2150(at)

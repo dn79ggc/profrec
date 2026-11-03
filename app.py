@@ -44,6 +44,28 @@ st.html("""
   color: color-mix(in srgb, currentColor 80%, transparent);
 }
 [data-testid="stAppDeployButton"] { display: none; }
+
+/* Chat box: Streamlit draws it with a transparent border and a fill 1.1:1 against the page, so it
+   disappears. A sage mixed with the theme's own text color gives 5:1 or better in both themes and
+   fades with them (currentColor is the text color). Focus adds an offset ring for keyboard users. */
+[data-testid="stChatInput"] > div:has(textarea) {
+  border: 2px solid color-mix(in srgb, #5F8F76 55%, currentColor);
+}
+[data-testid="stChatInput"] > div:has(textarea):focus-within {
+  outline: 2px solid color-mix(in srgb, #5F8F76 55%, currentColor);
+  outline-offset: 2px;
+}
+
+/* New session: Streamlit has no API for toolbar items, so the button is fixed-positioned into the
+   header, left of the menu (Deploy's old slot is empty). Out of flow, so it adds no gap to the page. */
+.st-key-new_session {
+  position: fixed;
+  top: 0.7rem;
+  right: 3.6rem;
+  z-index: 1000000;
+  width: auto;
+}
+.st-key-new_session button { min-height: 2.25rem; padding: 0.25rem 0.8rem; }
 [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
   background-color: color-mix(in srgb, currentColor 7%, transparent);
 }
@@ -56,6 +78,22 @@ st.html("""
 }
 </style>
 """)
+
+def new_session() -> None:
+    """Back to the first screen: no course, no request, no chip selected.
+
+    A widget is reset by assigning its keyed value, not by deleting it (a deleted widget keeps the value
+    the browser holds). req_id is deliberately NOT reset: the edit widgets are keyed by it, so reusing
+    numbers would bring an earlier session's edits back. Cached resources (engine, parser) are untouched.
+    """
+    st.session_state["course"] = None
+    st.session_state["example_pick"] = None
+    for k in ("last", "queued_prompt"):
+        st.session_state.pop(k, None)
+
+
+# No help= tooltip on purpose: Streamlit then adds a hidden 0x0 copy of the button that still takes a Tab stop.
+st.button("New session", key="new_session", on_click=new_session, icon=":material/restart_alt:")
 
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 CONF_LABEL = {"none": "no reviews", "low": "very few reviews", "medium": "some reviews", "high": "many reviews"}
@@ -292,7 +330,7 @@ st.title("Professor Match")
 st.caption("Pick a course, describe the professor you want, and see matching sections with the review evidence behind each recommendation.")
 
 courses = engine.courses()
-course = st.selectbox("Course", courses, index=None, format_func=lambda c: c.display,
+course = st.selectbox("Course", courses, index=None, format_func=lambda c: c.display, key="course",
                       placeholder="Type a course number or name, e.g. 2150 or intermediate programming")
 
 if "req_id" not in st.session_state:
